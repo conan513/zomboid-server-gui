@@ -32,13 +32,15 @@ class ServerManager extends EventEmitter {
   }
 
   addLog(text, type = 'stdout') {
-    const lines = text.split(/\r?\n/);
+    if (!text) return;
+    const lines = text.toString().split(/\r\n|\r|\n/);
     for (const line of lines) {
-      if (line.length === 0) continue;
+      const cleanLine = line.trim();
+      if (cleanLine.length === 0) continue;
       const logEntry = {
         id: Date.now() + Math.random().toString(36).substring(2, 7),
         time: new Date().toISOString(),
-        text: line,
+        text: cleanLine,
         type
       };
       this.logs.push(logEntry);
@@ -47,7 +49,7 @@ class ServerManager extends EventEmitter {
       }
       this.emit('log', logEntry);
 
-      this.analyzeLogLine(line);
+      this.analyzeLogLine(cleanLine);
     }
   }
 

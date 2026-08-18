@@ -167,6 +167,7 @@ export default function App() {
         serverInfo={serverInfo}
         serversList={serversList}
         currentServer={currentServer}
+        isSteamCmdRunning={isSteamCmdRunning}
         onChangeServer={(name) => {
           setCurrentServer(name);
           addNotification(`Switched to profile: ${name}.ini`, 'info');
@@ -205,8 +206,10 @@ export default function App() {
             settings={settings}
             installInfo={installInfo}
             isSteamCmdRunning={isSteamCmdRunning}
+            logs={logs}
             onRefreshSettings={loadInitialData}
             onNotify={addNotification}
+            onSwitchToConsole={() => setActiveTab('console')}
           />
         )}
 

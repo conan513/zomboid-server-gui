@@ -14,17 +14,40 @@ const STEAMCMD_URLS = {
 
 let currentProcess = null;
 
-function downloadFile(url, dest) {
+function downloadFile(url, dest, onProgress) {
   return new Promise((resolve, reject) => {
     fs.ensureDirSync(path.dirname(dest));
     const file = fs.createWriteStream(dest);
     https.get(url, (response) => {
       if (response.statusCode === 302 || response.statusCode === 301) {
-        return downloadFile(response.headers.location, dest).then(resolve).catch(reject);
+        return downloadFile(response.headers.location, dest, onProgress).then(resolve).catch(reject);
       }
       if (response.statusCode !== 200) {
         return reject(new Error(`Failed to download: Status Code ${response.statusCode}`));
       }
+
+      const totalBytes = parseInt(response.headers['content-length'] || '0', 10);
+      let downloadedBytes = 0;
+      let lastReport = 0;
+
+      response.on('data', (chunk) => {
+        downloadedBytes += chunk.length;
+        const now = Date.now();
+        if (now - lastReport > 800) { // report every ~800ms
+          lastReport = now;
+          if (onProgress) {
+            const mb = (downloadedBytes / (1024 * 1024)).toFixed(1);
+            const totalMb = totalBytes ? (totalBytes / (1024 * 1024)).toFixed(1) : null;
+            const pct = totalBytes ? Math.round((downloadedBytes / totalBytes) * 100) : null;
+            if (pct !== null) {
+              onProgress(`[SteamCMD Download] ${mb} MB / ${totalMb} MB (${pct}%)...`);
+            } else {
+              onProgress(`[SteamCMD Download] ${mb} MB downloaded...`);
+            }
+          }
+        }
+      });
+
       response.pipe(file);
       file.on('finish', () => {
         file.close(() => resolve(dest));
@@ -53,13 +76,13 @@ async function ensureSteamCmd(onLog) {
   }
 
   const downloadUrl = STEAMCMD_URLS[platform] || STEAMCMD_URLS.linux;
-  if (onLog) onLog(`[SteamCMD] steamcmd not found for platform "${process.platform}". Downloading from ${downloadUrl}...\n`);
+  if (onLog) onLog(`[SteamCMD] steamcmd not found on system. Downloading for "${process.platform}" from ${downloadUrl}...\n`);
   fs.ensureDirSync(steamCmdDir);
 
   if (platform === 'win32') {
     const zipPath = path.join(steamCmdDir, 'steamcmd.zip');
-    await downloadFile(downloadUrl, zipPath);
-    if (onLog) onLog(`[SteamCMD] Download complete. Extracting ZIP archive...\n`);
+    await downloadFile(downloadUrl, zipPath, onLog);
+    if (onLog) onLog(`[SteamCMD] Download complete. Extracting ZIP archive to ${steamCmdDir}...\n`);
 
     const zip = new AdmZip(zipPath);
     zip.extractAllTo(steamCmdDir, true);
@@ -67,8 +90,8 @@ async function ensureSteamCmd(onLog) {
   } else {
     // Linux / macOS (.tar.gz)
     const tarPath = path.join(steamCmdDir, 'steamcmd.tar.gz');
-    await downloadFile(downloadUrl, tarPath);
-    if (onLog) onLog(`[SteamCMD] Download complete. Extracting TAR.GZ archive...\n`);
+    await downloadFile(downloadUrl, tarPath, onLog);
+    if (onLog) onLog(`[SteamCMD] Download complete. Extracting TAR.GZ archive to ${steamCmdDir}...\n`);
 
     await tar.x({
       file: tarPath,
@@ -111,6 +134,8 @@ function installOrUpdateServer({ installPath, branch, betaPassword, validate = t
   const targetPath = installPath || settings.serverInstallPath;
   fs.ensureDirSync(targetPath);
 
+  if (onLog) onLog(`[SteamCMD] Initializing Project Zomboid Dedicated Server installer in "${targetPath}"...\n`);
+
   ensureSteamCmd(onLog).then((steamCmdExe) => {
     const args = [
       '+force_install_dir', targetPath,
@@ -132,7 +157,7 @@ function installOrUpdateServer({ installPath, branch, betaPassword, validate = t
     }
     args.push('+quit');
 
-    if (onLog) onLog(`[SteamCMD] Executing: "${steamCmdExe}" ${args.join(' ')}\n\n`);
+    if (onLog) onLog(`[SteamCMD] Launching: "${steamCmdExe}" ${args.join(' ')}\n\n`);
 
     const child = spawn(steamCmdExe, args, {
       cwd: path.dirname(steamCmdExe),
@@ -152,7 +177,7 @@ function installOrUpdateServer({ installPath, branch, betaPassword, validate = t
 
     child.on('close', (code) => {
       currentProcess = null;
-      if (onLog) onLog(`\n[SteamCMD] Process finished with exit code ${code}\n`);
+      if (onLog) onLog(`\n[SteamCMD] Process finished with exit code ${code} (0 = Success)\n`);
       if (onExit) onExit(code);
     });
 

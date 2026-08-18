@@ -41,6 +41,7 @@ router.get('/settings', (req, res) => {
 
 router.post('/settings', (req, res) => {
   const updated = updateSettings(req.body);
+  serverManager.addLog('[Web UI] Updated server and engine settings.', 'system');
   res.json({ success: true, settings: updated });
 });
 
@@ -56,9 +57,11 @@ router.get('/status', (req, res) => {
 
 router.post('/server/start', (req, res) => {
   try {
+    serverManager.addLog('[Web UI] Starting Project Zomboid Dedicated Server...', 'system');
     const status = serverManager.startServer(req.body);
     res.json({ success: true, status });
   } catch (err) {
+    serverManager.addLog(`[Web UI Error] Start failed: ${err.message}`, 'error');
     res.status(400).json({ success: false, error: err.message });
   }
 });
@@ -66,6 +69,7 @@ router.post('/server/start', (req, res) => {
 router.post('/server/stop', (req, res) => {
   try {
     const force = req.body?.force || false;
+    serverManager.addLog(`[Web UI] Stopping server (Force: ${force})...`, 'system');
     serverManager.stopServer(force);
     res.json({ success: true });
   } catch (err) {
@@ -75,6 +79,7 @@ router.post('/server/stop', (req, res) => {
 
 router.post('/server/restart', (req, res) => {
   try {
+    serverManager.addLog('[Web UI] Restarting server...', 'system');
     serverManager.restartServer();
     res.json({ success: true });
   } catch (err) {
@@ -102,10 +107,16 @@ router.get('/server/logs', (req, res) => {
 // ----------------- STEAMCMD INSTALLER -----------------
 router.post('/steamcmd/install', (req, res) => {
   if (steamcmd.isSteamCmdRunning()) {
-    return res.status(400).json({ error: 'SteamCMD is already running' });
+    return res.status(400).json({ error: 'SteamCMD is already running in background!' });
   }
 
   const { installPath, branch, betaPassword, validate } = req.body || {};
+
+  serverManager.addLog('================================================================', 'system');
+  serverManager.addLog('[Web UI] Triggered SteamCMD Project Zomboid Server Installation/Update...', 'system');
+  serverManager.addLog(`[Web UI] Target Path: ${installPath || getSettings().serverInstallPath}`, 'system');
+  serverManager.addLog(`[Web UI] Branch: ${branch || 'public'} | Validate: ${validate !== false}`, 'system');
+  serverManager.addLog('================================================================', 'system');
 
   steamcmd.installOrUpdateServer(
     { installPath, branch, betaPassword, validate },
@@ -113,7 +124,11 @@ router.post('/steamcmd/install', (req, res) => {
       serverManager.addLog(logText, 'steamcmd');
     },
     (exitCode) => {
-      serverManager.addLog(`SteamCMD finished with exit code ${exitCode}`, 'steamcmd');
+      if (exitCode === 0) {
+        serverManager.addLog('[SteamCMD] Server installation / update completed successfully!', 'system');
+      } else {
+        serverManager.addLog(`[SteamCMD] Process finished with exit code ${exitCode}`, 'steamcmd');
+      }
     }
   );
 
@@ -121,6 +136,7 @@ router.post('/steamcmd/install', (req, res) => {
 });
 
 router.post('/steamcmd/cancel', (req, res) => {
+  serverManager.addLog('[Web UI] Cancelling active SteamCMD process...', 'warning');
   const cancelled = steamcmd.cancelSteamCmd();
   res.json({ success: cancelled });
 });
@@ -135,7 +151,6 @@ router.get('/mods', async (req, res) => {
   const serverName = req.query.serverName || settings.serverName || 'servertest';
   let savedMods = getSavedMods();
 
-  // Also check if server INI has mods that are not yet in savedMods
   const iniModsInfo = iniParser.getModsFromIni(serverName);
 
   res.json({
@@ -149,9 +164,12 @@ router.post('/mods/fetch', async (req, res) => {
   try {
     const { query } = req.body;
     if (!query) return res.status(400).json({ error: 'Workshop ID or URL is required' });
+    serverManager.addLog(`[Web UI] Fetching Steam Workshop item: "${query}"...`, 'system');
     const modInfo = await workshopService.fetchWorkshopDetails(query);
+    serverManager.addLog(`[Web UI] Loaded mod: "${modInfo.title}" (ID: ${modInfo.workshopId}, ModIDs: ${modInfo.modIds.join(', ')})`, 'system');
     res.json({ success: true, mod: modInfo });
   } catch (err) {
+    serverManager.addLog(`[Web UI Error] Failed to fetch mod "${req.body?.query}": ${err.message}`, 'error');
     res.status(400).json({ success: false, error: err.message });
   }
 });
@@ -163,7 +181,9 @@ router.post('/mods/batch-fetch', async (req, res) => {
     if (!Array.isArray(workshopIds)) {
       return res.status(400).json({ error: 'workshopIds array required' });
     }
+    serverManager.addLog(`[Web UI] Batch fetching ${workshopIds.length} Steam Workshop items...`, 'system');
     const results = await workshopService.batchFetchWorkshop(workshopIds);
+    serverManager.addLog(`[Web UI] Batch fetched ${results.length} mods successfully.`, 'system');
     res.json({ success: true, mods: results });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
@@ -178,14 +198,12 @@ router.post('/mods/save', (req, res) => {
       return res.status(400).json({ error: 'mods must be an array' });
     }
 
-    // Save to data/mods.json
     saveModsFile(mods);
 
     let syncResult = null;
     if (syncToIni) {
       const activeServer = serverName || getSettings().serverName || 'servertest';
 
-      // Flatten enabled mod IDs in exact priority order
       const orderedModIds = [];
       const orderedWorkshopIds = [];
       const maps = [];
@@ -195,14 +213,12 @@ router.post('/mods/save', (req, res) => {
           if (m.workshopId && !orderedWorkshopIds.includes(m.workshopId)) {
             orderedWorkshopIds.push(m.workshopId);
           }
-          // Selected Mod IDs for this workshop item
           const selected = m.selectedModIds && m.selectedModIds.length > 0 ? m.selectedModIds : m.modIds;
           for (const mid of selected) {
             if (!orderedModIds.includes(mid)) {
               orderedModIds.push(mid);
             }
           }
-          // Maps
           if (m.mapFolders && Array.isArray(m.mapFolders)) {
             for (const mapName of m.mapFolders) {
               if (!maps.includes(mapName)) maps.push(mapName);
@@ -216,6 +232,8 @@ router.post('/mods/save', (req, res) => {
         workshopItems: orderedWorkshopIds,
         maps
       });
+
+      serverManager.addLog(`[Web UI] Synced ${orderedModIds.length} Mod IDs and ${orderedWorkshopIds.length} Workshop items to ${activeServer}.ini!`, 'system');
     }
 
     res.json({
@@ -233,16 +251,17 @@ router.post('/mods/import-ini', async (req, res) => {
   try {
     const { serverName } = req.body;
     const activeServer = serverName || getSettings().serverName || 'servertest';
+    serverManager.addLog(`[Web UI] Scanning ${activeServer}.ini for existing mods...`, 'system');
     const iniInfo = iniParser.getModsFromIni(activeServer);
 
     if (iniInfo.workshopList.length === 0 && iniInfo.modList.length === 0) {
+      serverManager.addLog(`[Web UI] No mods found in ${activeServer}.ini`, 'system');
       return res.json({ success: true, count: 0, mods: [] });
     }
 
-    // Fetch details for all Workshop IDs in the ini
+    serverManager.addLog(`[Web UI] Found ${iniInfo.workshopList.length} Workshop IDs in ${activeServer}.ini. Fetching Steam details...`, 'system');
     const fetchedMods = await workshopService.batchFetchWorkshop(iniInfo.workshopList);
 
-    // Reconcile selected mod IDs with ini modList
     for (const mod of fetchedMods) {
       const activeInIni = mod.modIds.filter(id => iniInfo.modList.includes(id));
       mod.selectedModIds = activeInIni.length > 0 ? activeInIni : mod.modIds;
@@ -250,6 +269,7 @@ router.post('/mods/import-ini', async (req, res) => {
     }
 
     saveModsFile(fetchedMods);
+    serverManager.addLog(`[Web UI] Successfully imported ${fetchedMods.length} mods from ${activeServer}.ini`, 'system');
 
     res.json({
       success: true,
@@ -285,6 +305,7 @@ router.post('/config/ini', (req, res) => {
     const activeServer = serverName || getSettings().serverName || 'servertest';
     const iniPath = iniParser.getServerIniPath(activeServer);
     iniParser.writeIniFile(iniPath, config);
+    serverManager.addLog(`[Web UI] Saved server settings to ${activeServer}.ini`, 'system');
     res.json({ success: true, message: 'Server INI saved successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -315,7 +336,9 @@ router.get('/backups', (req, res) => {
 router.post('/backups/create', (req, res) => {
   try {
     const { serverName } = req.body;
+    serverManager.addLog(`[Web UI] Creating backup archive for server "${serverName || 'servertest'}"...`, 'system');
     const backup = backupService.createBackup(serverName);
+    serverManager.addLog(`[Web UI] Created backup archive: "${backup.filename}" (${backup.size})`, 'system');
     res.json({ success: true, backup });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -326,7 +349,9 @@ router.post('/backups/restore', (req, res) => {
   try {
     const { filename } = req.body;
     if (!filename) return res.status(400).json({ error: 'Filename is required' });
+    serverManager.addLog(`[Web UI] Restoring backup archive: "${filename}"...`, 'warning');
     backupService.restoreBackup(filename);
+    serverManager.addLog(`[Web UI] Backup "${filename}" restored successfully.`, 'system');
     res.json({ success: true, message: 'Backup restored successfully.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -337,6 +362,7 @@ router.delete('/backups/:filename', (req, res) => {
   try {
     const { filename } = req.params;
     const deleted = backupService.deleteBackup(filename);
+    serverManager.addLog(`[Web UI] Deleted backup archive: "${filename}"`, 'system');
     res.json({ success: deleted });
   } catch (err) {
     res.status(500).json({ error: err.message });

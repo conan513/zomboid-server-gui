@@ -22,8 +22,11 @@ app.use('/api', apiRoutes);
 const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDistPath));
 
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
+// SPA Fallback Middleware (Express 5 compatible)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: 'API endpoint not found' });
+  }
   const indexHtml = path.join(clientDistPath, 'index.html');
   if (require('fs').existsSync(indexHtml)) {
     res.sendFile(indexHtml);

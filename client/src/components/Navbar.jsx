@@ -10,7 +10,8 @@ import {
   RotateCw,
   Users,
   Activity,
-  Server
+  Server,
+  Loader2
 } from 'lucide-react';
 
 export default function Navbar({
@@ -20,6 +21,7 @@ export default function Navbar({
   serverInfo,
   serversList,
   currentServer,
+  isSteamCmdRunning,
   onChangeServer,
   onStartServer,
   onStopServer,
@@ -33,7 +35,7 @@ export default function Navbar({
     { id: 'mods', label: 'Mod Manager', icon: Layers, badge: 'Core' },
     { id: 'console', label: 'Live Console', icon: Terminal },
     { id: 'settings', label: 'Configuration', icon: Sliders },
-    { id: 'installer', label: 'Installation & SteamCMD', icon: DownloadCloud },
+    { id: 'installer', label: 'Installation & SteamCMD', icon: DownloadCloud, badge: isSteamCmdRunning ? 'Active' : null },
     { id: 'backups', label: 'Backups', icon: Archive }
   ];
 
@@ -72,6 +74,18 @@ export default function Navbar({
 
           {/* Quick Server Controls & Status Pill */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* SteamCMD active indicator if downloading */}
+            {isSteamCmdRunning && (
+              <div
+                onClick={() => setActiveTab('installer')}
+                className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-950/80 border border-indigo-700 text-xs text-indigo-300 animate-pulse hover:bg-indigo-900 transition"
+                title="SteamCMD is running in background. Click to view."
+              >
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                <span className="font-semibold hidden sm:inline">SteamCMD Active</span>
+              </div>
+            )}
+
             {/* Status Pill */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs">
               <span className={`w-2.5 h-2.5 rounded-full ${
@@ -150,7 +164,11 @@ export default function Navbar({
                 <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-400' : 'text-slate-500'}`} />
                 <span>{item.label}</span>
                 {item.badge && (
-                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800/50">
+                  <span className={`px-1.5 py-0.2 rounded text-[10px] ${
+                    item.badge === 'Active'
+                      ? 'bg-indigo-900 text-indigo-200 border border-indigo-500 animate-pulse font-bold'
+                      : 'bg-cyan-950 text-cyan-300 border border-cyan-800/50'
+                  }`}>
                     {item.badge}
                   </span>
                 )}

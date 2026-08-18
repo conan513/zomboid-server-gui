@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   DownloadCloud,
   Folder,
@@ -8,7 +8,9 @@ import {
   AlertTriangle,
   RefreshCw,
   XCircle,
-  Play
+  Terminal,
+  ExternalLink,
+  Loader2
 } from 'lucide-react';
 import { installServer, cancelSteamCmd, saveSettings } from '../services/api';
 
@@ -16,8 +18,10 @@ export default function ServerInstaller({
   settings,
   installInfo,
   isSteamCmdRunning,
+  logs = [],
   onRefreshSettings,
-  onNotify
+  onNotify,
+  onSwitchToConsole
 }) {
   const [installPath, setInstallPath] = useState(settings.serverInstallPath || '');
   const [branch, setBranch] = useState(settings.branch || 'public');
@@ -26,6 +30,18 @@ export default function ServerInstaller({
   const [memoryMax, setMemoryMax] = useState(settings.memoryMax || '8g');
   const [validate, setValidate] = useState(true);
   const [installing, setInstalling] = useState(false);
+
+  const steamLogsRef = useRef(null);
+
+  // Filter logs related to steamcmd or install actions
+  const steamLogs = logs.filter(l => l.type === 'steamcmd' || (l.text && (l.text.includes('SteamCMD') || l.text.includes('Installation') || l.text.includes('AppID'))));
+
+  // Auto-scroll steam logs
+  useEffect(() => {
+    if (steamLogsRef.current) {
+      steamLogsRef.current.scrollTop = steamLogsRef.current.scrollHeight;
+    }
+  }, [steamLogs]);
 
   async function handleSaveSettings() {
     try {
@@ -54,9 +70,9 @@ export default function ServerInstaller({
         validate
       });
       if (res.success) {
-        if (onNotify) onNotify('SteamCMD server installation / update started! Check Console tab for live progress.', 'success');
+        if (onNotify) onNotify('SteamCMD process started! Live progress streaming below.', 'success');
       } else {
-        if (onNotify) onNotify('Installation failed to start: ' + res.error, 'error');
+        if (onNotify) onNotify('Installation failed: ' + res.error, 'error');
       }
     } catch (e) {
       if (onNotify) onNotify('Error starting installation: ' + e.message, 'error');
@@ -77,6 +93,7 @@ export default function ServerInstaller({
   }
 
   const isInstalled = installInfo?.installed;
+  const isWorking = isSteamCmdRunning || installing;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -84,16 +101,35 @@ export default function ServerInstaller({
       <div className="glass-panel rounded-2xl p-5 border border-slate-800 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className={`p-3 rounded-xl border ${
-            isInstalled
+            isWorking
+              ? 'bg-cyan-950/80 border-cyan-700/80 text-cyan-400 animate-pulse'
+              : isInstalled
               ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-400'
               : 'bg-amber-950/60 border-amber-800/60 text-amber-400'
           }`}>
-            {isInstalled ? <CheckCircle className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
+            {isWorking ? (
+              <Loader2 className="w-6 h-6 animate-spin" />
+            ) : isInstalled ? (
+              <CheckCircle className="w-6 h-6" />
+            ) : (
+              <AlertTriangle className="w-6 h-6" />
+            )}
           </div>
           <div>
-            <h3 className="font-bold text-white text-base">
-              {isInstalled ? 'Project Zomboid Server Installed' : 'Server Not Installed Yet'}
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-white text-base">
+                {isWorking
+                  ? 'SteamCMD Server Installation / Update in Progress...'
+                  : isInstalled
+                  ? 'Project Zomboid Server Installed'
+                  : 'Server Not Installed Yet'}
+              </h3>
+              {isWorking && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-cyan-900/80 text-cyan-300 border border-cyan-600 animate-pulse">
+                  Active
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-400 font-mono mt-0.5">
               Path: {installInfo?.path || settings.serverInstallPath}
             </p>
@@ -101,7 +137,7 @@ export default function ServerInstaller({
         </div>
 
         <div className="flex items-center gap-2">
-          {isSteamCmdRunning ? (
+          {isWorking ? (
             <button
               onClick={handleCancel}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold shadow transition"
@@ -118,6 +154,59 @@ export default function ServerInstaller({
               <DownloadCloud className="w-4 h-4" />
               <span>{isInstalled ? 'Update / Validate Server' : 'Install Server via SteamCMD'}</span>
             </button>
+          )}
+        </div>
+      </div>
+
+      {/* Live SteamCMD Console Terminal Box */}
+      <div className="glass-panel rounded-2xl p-4 border border-slate-800 shadow-xl space-y-2">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 text-xs">
+          <div className="flex items-center gap-2 text-slate-300 font-semibold">
+            <Terminal className="w-4 h-4 text-cyan-400" />
+            <span>SteamCMD Live Activity Log</span>
+            {isWorking && (
+              <span className="flex items-center gap-1 text-[11px] text-cyan-400 font-normal">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Working in background...
+              </span>
+            )}
+          </div>
+
+          {onSwitchToConsole && (
+            <button
+              onClick={onSwitchToConsole}
+              className="text-[11px] text-cyan-400 hover:text-cyan-300 hover:underline flex items-center gap-1 font-medium"
+            >
+              <span>Open Full Console</span>
+              <ExternalLink className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
+        <div
+          ref={steamLogsRef}
+          className="h-44 overflow-y-auto bg-slate-950/90 rounded-xl p-3 font-mono text-[11px] space-y-1 select-text border border-slate-900"
+        >
+          {steamLogs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-slate-600 text-center">
+              <span>No SteamCMD activity logged yet.</span>
+              <span className="text-[10px] text-slate-700">Click "Install Server via SteamCMD" above to download and install.</span>
+            </div>
+          ) : (
+            steamLogs.map((log) => {
+              let colorClass = 'text-slate-300';
+              if (log.type === 'system') colorClass = 'text-cyan-400 font-semibold';
+              else if (log.type === 'steamcmd') colorClass = 'text-indigo-300';
+              else if (log.type === 'error' || log.text.includes('ERR') || log.text.includes('Error')) colorClass = 'text-red-400';
+              else if (log.text.includes('Success') || log.text.includes('complete') || log.text.includes('100%')) colorClass = 'text-emerald-400 font-semibold';
+
+              return (
+                <div key={log.id} className="leading-relaxed break-all">
+                  <span className="text-slate-600 text-[10px] mr-2">[{new Date(log.time).toLocaleTimeString()}]</span>
+                  <span className={colorClass}>{log.text}</span>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
