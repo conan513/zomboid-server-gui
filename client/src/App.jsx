@@ -4,6 +4,7 @@ import ModManager from './components/ModManager';
 import ConsoleView from './components/ConsoleView';
 import ServerSettings from './components/ServerSettings';
 import SandboxSettings from './components/SandboxSettings';
+import ModOptionsSettings from './components/ModOptionsSettings';
 import ServerInstaller from './components/ServerInstaller';
 import BackupManager from './components/BackupManager';
 import {
@@ -199,6 +200,15 @@ export default function App() {
           <SandboxSettings
             serverName={currentServer}
             onNotify={addNotification}
+            onSwitchToModOptions={() => setActiveTab('modoptions')}
+          />
+        )}
+
+        {activeTab === 'modoptions' && (
+          <ModOptionsSettings
+            serverName={currentServer}
+            onNotify={addNotification}
+            onSwitchToVanilla={() => setActiveTab('sandbox')}
           />
         )}
 

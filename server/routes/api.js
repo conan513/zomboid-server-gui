@@ -325,8 +325,10 @@ router.get('/config/sandbox', (req, res) => {
       filePath,
       exists: data.exists,
       categories: data.categories,
+      modGroups: data.modGroups,
       flatVars: data.flatVars,
-      raw: data.raw
+      raw: data.raw,
+      stats: data.stats
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

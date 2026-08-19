@@ -25,7 +25,12 @@ import {
   ArrowRight,
   Bookmark,
   Wand2,
-  X
+  X,
+  Plus,
+  Puzzle,
+  FileCode,
+  SlidersHorizontal,
+  ChevronDown
 } from 'lucide-react';
 import { fetchSandboxConfig, saveSandboxConfig } from '../services/api';
 
@@ -182,10 +187,10 @@ const CATEGORY_ICONS = {
   world_infrastructure: Volume2,
   map: MapPin,
   basement: Layers,
-  general_misc: Sliders
+  general_modded: Puzzle
 };
 
-export default function SandboxSettings({ serverName, onNotify }) {
+export default function SandboxSettings({ serverName, onNotify, onSwitchToModOptions }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [filePath, setFilePath] = useState('');
@@ -193,19 +198,29 @@ export default function SandboxSettings({ serverName, onNotify }) {
   const [originalVars, setOriginalVars] = useState({});
   const [currentVars, setCurrentVars] = useState({});
   const [rawLua, setRawLua] = useState('');
+  const [stats, setStats] = useState({ totalKeys: 0, modCategoriesCount: 0, modKeysCount: 0, isModded: false });
   const [editorMode, setEditorMode] = useState('visual'); // 'visual' or 'raw'
   const [activeCategoryId, setActiveCategoryId] = useState('all');
+  const [scopeFilter, setScopeFilter] = useState('all'); // 'all' | 'vanilla' | 'modded'
   const [searchQuery, setSearchQuery] = useState('');
   const [filterModifiedOnly, setFilterModifiedOnly] = useState(false);
   const [showPresetsModal, setShowPresetsModal] = useState(false);
   const [activePresetId, setActivePresetId] = useState(null);
 
+  // New Variable Modal State
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newVarTable, setNewVarTable] = useState('General');
+  const [newVarCustomTable, setNewVarCustomTable] = useState('');
+  const [newVarKey, setNewVarKey] = useState('');
+  const [newVarType, setNewVarType] = useState('boolean'); // 'boolean' | 'integer' | 'float' | 'string'
+  const [newVarValue, setNewVarValue] = useState('true');
+
   useEffect(() => {
     loadConfig();
   }, [serverName]);
 
-  async function loadConfig() {
-    setLoading(true);
+  async function loadConfig(isSilent = false) {
+    if (!isSilent) setLoading(true);
     try {
       const data = await fetchSandboxConfig(serverName);
       setFilePath(data.filePath || '');
@@ -213,13 +228,11 @@ export default function SandboxSettings({ serverName, onNotify }) {
       setOriginalVars(data.flatVars || {});
       setCurrentVars(data.flatVars || {});
       setRawLua(data.raw || '');
-      if (data.categories && data.categories.length > 0 && activeCategoryId === 'all') {
-        // keep 'all' or default
-      }
+      if (data.stats) setStats(data.stats);
     } catch (err) {
       if (onNotify) onNotify('Error loading SandboxVars.lua: ' + err.message, 'error');
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   }
 
@@ -228,6 +241,9 @@ export default function SandboxSettings({ serverName, onNotify }) {
     const keys = [];
     for (const [k, v] of Object.entries(currentVars)) {
       if (originalVars[k] !== undefined && originalVars[k] !== v) {
+        keys.push(k);
+      } else if (originalVars[k] === undefined && v !== undefined) {
+        // Newly added key
         keys.push(k);
       }
     }
@@ -289,7 +305,7 @@ export default function SandboxSettings({ serverName, onNotify }) {
       setOriginalVars({ ...currentVars });
       if (onNotify) onNotify(`Sandbox settings saved to ${serverName}_SandboxVars.lua successfully!`, 'success');
       // Reload fresh state
-      await loadConfig();
+      await loadConfig(true);
     } catch (err) {
       if (onNotify) onNotify('Save failed: ' + err.message, 'error');
     } finally {
@@ -297,12 +313,99 @@ export default function SandboxSettings({ serverName, onNotify }) {
     }
   }
 
-  // Filter items based on activeCategory, searchQuery, and filterModifiedOnly
+  // Handle adding a new custom or mod variable
+  function handleAddCustomVariable(e) {
+    e.preventDefault();
+    const cleanKey = newVarKey.trim();
+    if (!cleanKey) {
+      if (onNotify) onNotify('Variable key name cannot be empty.', 'warning');
+      return;
+    }
+
+    let finalTable = newVarTable;
+    if (newVarTable === '__new__') {
+      finalTable = newVarCustomTable.trim();
+      if (!finalTable) {
+        if (onNotify) onNotify('Please enter a sub-table name.', 'warning');
+        return;
+      }
+    }
+
+    const varPath = finalTable === 'General' ? cleanKey : `${finalTable}.${cleanKey}`;
+
+    let parsedVal = newVarValue;
+    if (newVarType === 'boolean') {
+      parsedVal = newVarValue === 'true';
+    } else if (newVarType === 'integer') {
+      parsedVal = parseInt(newVarValue, 10) || 0;
+    } else if (newVarType === 'float') {
+      parsedVal = parseFloat(newVarValue) || 0.0;
+    }
+
+    // Add to current vars
+    setCurrentVars(prev => ({
+      ...prev,
+      [varPath]: parsedVal
+    }));
+
+    // Dynamically insert into categories state if not present
+    setCategories(prev => {
+      const copy = [...prev];
+      const targetCatId = finalTable === 'General' ? 'general_modded' : `mod_${finalTable.toLowerCase()}`;
+      let targetCat = copy.find(c => c.id === targetCatId);
+
+      const newItem = {
+        table: finalTable,
+        key: cleanKey,
+        path: varPath,
+        value: parsedVal,
+        type: newVarType,
+        comment: '',
+        description: 'Custom added variable',
+        options: null,
+        min: null,
+        max: null,
+        defaultVal: String(parsedVal),
+        isMod: true
+      };
+
+      if (targetCat) {
+        if (!targetCat.items.some(i => i.path === varPath)) {
+          targetCat.items = [newItem, ...targetCat.items];
+        }
+      } else {
+        copy.push({
+          id: targetCatId,
+          name: `${finalTable} (Mod)`,
+          isSubTable: finalTable !== 'General',
+          isModCategory: true,
+          tableName: finalTable,
+          items: [newItem]
+        });
+      }
+      return copy;
+    });
+
+    setShowAddModal(false);
+    setNewVarKey('');
+    setNewVarCustomTable('');
+    if (onNotify) onNotify(`Added custom variable: ${varPath}. Remember to click Save!`, 'success');
+  }
+
+  // Filter items based on activeCategory, scopeFilter, searchQuery, and filterModifiedOnly
   const displayedCategories = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
     return categories.map(cat => {
+      // Scope filtering
+      if (scopeFilter === 'vanilla' && cat.isModCategory) return { ...cat, items: [] };
+      if (scopeFilter === 'modded' && !cat.isModCategory && !cat.items.some(i => i.isMod)) return { ...cat, items: [] };
+
       let filteredItems = cat.items;
+
+      if (scopeFilter === 'modded' && !cat.isModCategory) {
+        filteredItems = filteredItems.filter(item => item.isMod);
+      }
 
       if (query) {
         filteredItems = filteredItems.filter(item => {
@@ -328,7 +431,7 @@ export default function SandboxSettings({ serverName, onNotify }) {
       }
       return cat.items.length > 0;
     });
-  }, [categories, activeCategoryId, searchQuery, filterModifiedOnly, modifiedKeys]);
+  }, [categories, activeCategoryId, scopeFilter, searchQuery, filterModifiedOnly, modifiedKeys]);
 
   const totalVisibleItems = useMemo(() => {
     return displayedCategories.reduce((acc, cat) => acc + cat.items.length, 0);
@@ -350,8 +453,8 @@ export default function SandboxSettings({ serverName, onNotify }) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-slate-500">
         <RefreshCw className="w-9 h-9 animate-spin text-cyan-400 mb-3" />
-        <p className="text-sm font-medium text-slate-300">Loading {serverName}_SandboxVars.lua...</p>
-        <p className="text-xs text-slate-500 mt-1">Parsing world parameters, zombie lore & XP multipliers</p>
+        <p className="text-sm font-medium text-slate-300">Dynamically parsing {serverName}_SandboxVars.lua...</p>
+        <p className="text-xs text-slate-500 mt-1">Scanning world parameters, zombie lore, and modded sub-tables</p>
       </div>
     );
   }
@@ -362,15 +465,21 @@ export default function SandboxSettings({ serverName, onNotify }) {
       <div className="glass-panel rounded-2xl p-5 sm:p-6 border border-slate-800 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-600 to-blue-800 flex items-center justify-center text-white shadow-lg border border-cyan-500/40">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-600 via-blue-700 to-indigo-900 flex items-center justify-center text-white shadow-lg border border-cyan-500/40">
               <Globe className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+              <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2 flex-wrap">
                 <span>Sandbox World Settings</span>
                 <span className="text-[11px] font-mono font-normal px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800/80 text-cyan-300">
-                  SandboxVars.lua
+                  Dynamic Parser
                 </span>
+                {stats.isModded && (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-950/90 border border-indigo-500/60 text-indigo-300 flex items-center gap-1">
+                    <Puzzle className="w-3 h-3 text-indigo-400" />
+                    <span>{stats.modKeysCount} Modded Options</span>
+                  </span>
+                )}
               </h2>
               <p className="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-xl">
                 {filePath || `${serverName}_SandboxVars.lua`}
@@ -380,6 +489,40 @@ export default function SandboxSettings({ serverName, onNotify }) {
         </div>
 
         <div className="flex items-center flex-wrap gap-2.5 w-full md:w-auto justify-end">
+          {/* Reload from Disk */}
+          <button
+            onClick={() => {
+              loadConfig();
+              if (onNotify) onNotify('Sandbox configuration reloaded from disk.', 'info');
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold border border-slate-800 transition"
+            title="Reload SandboxVars.lua from disk"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
+            <span>Reload</span>
+          </button>
+
+          {/* Add Custom / Mod Variable */}
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-semibold border border-slate-700 transition shadow"
+            title="Add a custom or mod sandbox variable directly"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Mod Setting</span>
+          </button>
+
+          {onSwitchToModOptions && stats.isModded && (
+            <button
+              onClick={onSwitchToModOptions}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-500/70 text-indigo-200 hover:text-white text-xs font-semibold shadow-lg transition"
+              title="Ugrás a különálló Mod Beállítások fülre"
+            >
+              <Puzzle className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Mod Beállítások ({stats.modKeysCount})</span>
+            </button>
+          )}
+
           {/* Preset Selector Button */}
           <button
             onClick={() => setShowPresetsModal(true)}
@@ -388,9 +531,6 @@ export default function SandboxSettings({ serverName, onNotify }) {
           >
             <Wand2 className="w-3.5 h-3.5 text-indigo-400" />
             <span>Preset Sablonok</span>
-            <span className="text-[10px] bg-indigo-900/80 px-1.5 py-0.2 rounded border border-indigo-700 text-indigo-300 font-bold">
-              {PRESETS.length}
-            </span>
           </button>
 
           {/* Mode Switcher */}
@@ -473,14 +613,59 @@ export default function SandboxSettings({ serverName, onNotify }) {
       ) : (
         /* VISUAL FORM EDITOR */
         <div className="space-y-5">
-          {/* Controls Bar: Search & Quick Filters */}
+          {/* Automatic Mod Discovery Notification Banner */}
+          {stats.isModded && (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-950/80 via-purple-950/60 to-slate-900/90 border border-indigo-500/40 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 backdrop-blur-md">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-indigo-900/80 border border-indigo-600/60 text-indigo-300 shadow-inner shrink-0 mt-0.5 sm:mt-0">
+                  <Sparkles className="w-5 h-5 text-indigo-300 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
+                    <span>Automatikus Mod Opció Detektálás Aktív!</span>
+                    <span className="text-[10px] bg-indigo-900/90 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-500 font-mono">
+                      {stats.modKeysCount} mod beállítás betöltve
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-indigo-200/80 mt-0.5 leading-relaxed">
+                    A rendszer automatikusan beolvasta a telepített Workshop modok sandbox beállításait és leírásait (pl.{' '}
+                    <strong className="text-white">
+                      {stats.discoveredMods && stats.discoveredMods.length > 0
+                        ? stats.discoveredMods.slice(0, 4).join(', ') + (stats.discoveredMods.length > 4 ? ` és további ${stats.discoveredMods.length - 4} mod` : '')
+                        : `${stats.modCategoriesCount} mod kategória`}
+                    </strong>
+                    ). Nem szükséges manuálisan felvenned semmit, minden opció közvetlenül szerkeszthető alább!
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {onSwitchToModOptions && (
+                  <button
+                    onClick={onSwitchToModOptions}
+                    className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-md transition flex items-center gap-1.5"
+                  >
+                    <Puzzle className="w-3.5 h-3.5" />
+                    <span>Mod Beállítások Fül Megnyitása</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setScopeFilter('modded')}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-900/80 hover:bg-indigo-800 text-indigo-200 text-xs font-semibold border border-indigo-600/60 transition"
+                >
+                  Szűrés Modokra ({stats.modKeysCount})
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Controls Bar: Search, Scope Filter & Quick Filters */}
           <div className="glass-panel rounded-2xl p-4 border border-slate-800 shadow-lg flex flex-col md:flex-row items-center justify-between gap-3">
             {/* Search Input */}
             <div className="relative w-full md:w-96">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
-                placeholder="Search variables, descriptions, settings..."
+                placeholder="Search variables, descriptions, mod options..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-cyan-500"
@@ -495,8 +680,37 @@ export default function SandboxSettings({ serverName, onNotify }) {
               )}
             </div>
 
-            {/* Quick Filter Pill */}
-            <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+            {/* Scope Filter & Modified Filter */}
+            <div className="flex items-center flex-wrap gap-2 w-full md:w-auto justify-end">
+              {/* Scope Selector */}
+              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                <button
+                  onClick={() => setScopeFilter('all')}
+                  className={`px-3 py-1 rounded-lg font-semibold transition ${
+                    scopeFilter === 'all' ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  All ({stats.totalKeys})
+                </button>
+                <button
+                  onClick={() => setScopeFilter('vanilla')}
+                  className={`px-3 py-1 rounded-lg font-semibold transition ${
+                    scopeFilter === 'vanilla' ? 'bg-cyan-950 text-cyan-300 border border-cyan-800' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Core Vanilla
+                </button>
+                <button
+                  onClick={() => setScopeFilter('modded')}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold transition ${
+                    scopeFilter === 'modded' ? 'bg-indigo-950 text-indigo-300 border border-indigo-700' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Puzzle className="w-3 h-3 text-indigo-400" />
+                  <span>Modded ({stats.modKeysCount})</span>
+                </button>
+              </div>
+
               {modifiedKeys.length > 0 && (
                 <button
                   onClick={() => setFilterModifiedOnly(prev => !prev)}
@@ -507,7 +721,7 @@ export default function SandboxSettings({ serverName, onNotify }) {
                   }`}
                 >
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Modified Only ({modifiedKeys.length})</span>
+                  <span>Modified ({modifiedKeys.length})</span>
                 </button>
               )}
 
@@ -527,12 +741,12 @@ export default function SandboxSettings({ serverName, onNotify }) {
                   : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <Sliders className="w-3.5 h-3.5" />
+              <SlidersHorizontal className="w-3.5 h-3.5" />
               <span>All Categories</span>
             </button>
 
             {categories.map((cat) => {
-              const Icon = CATEGORY_ICONS[cat.id] || Sliders;
+              const Icon = cat.isModCategory ? Puzzle : (CATEGORY_ICONS[cat.id] || Sliders);
               const isActive = activeCategoryId === cat.id;
               const catModifiedCount = cat.items.filter(i => modifiedKeys.includes(i.path)).length;
 
@@ -542,12 +756,21 @@ export default function SandboxSettings({ serverName, onNotify }) {
                   onClick={() => setActiveCategoryId(cat.id)}
                   className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition border ${
                     isActive
-                      ? 'bg-cyan-950/90 border-cyan-500/70 text-cyan-300 shadow-md'
-                      : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                      ? cat.isModCategory
+                        ? 'bg-indigo-950/90 border-indigo-500/80 text-indigo-200 shadow-md'
+                        : 'bg-cyan-950/90 border-cyan-500/70 text-cyan-300 shadow-md'
+                      : cat.isModCategory
+                        ? 'bg-indigo-950/30 border-indigo-900/60 text-indigo-300/80 hover:text-indigo-200 hover:bg-indigo-900/40'
+                        : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                   }`}
                 >
-                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-cyan-400' : 'text-slate-500'}`} />
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? (cat.isModCategory ? 'text-indigo-300' : 'text-cyan-400') : 'text-slate-500'}`} />
                   <span>{cat.name}</span>
+                  {cat.isModCategory && (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-900/80 text-indigo-300 border border-indigo-700/60 font-bold uppercase">
+                      Mod
+                    </span>
+                  )}
                   {catModifiedCount > 0 && (
                     <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40">
                       {catModifiedCount}
@@ -562,23 +785,39 @@ export default function SandboxSettings({ serverName, onNotify }) {
           {displayedCategories.length === 0 ? (
             <div className="glass-panel rounded-2xl p-12 text-center border border-slate-800">
               <Search className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-              <p className="text-sm font-semibold text-slate-300">No settings found matching your search.</p>
-              <p className="text-xs text-slate-500 mt-1">Try clearing your search query or selecting another category.</p>
+              <p className="text-sm font-semibold text-slate-300">No settings found matching your search or filters.</p>
+              <p className="text-xs text-slate-500 mt-1">Try resetting the search query or switching scope to All.</p>
             </div>
           ) : (
             displayedCategories.map((cat) => (
-              <div key={cat.id} className="glass-panel rounded-2xl p-5 sm:p-6 border border-slate-800 shadow-xl space-y-4">
+              <div
+                key={cat.id}
+                className={`glass-panel rounded-2xl p-5 sm:p-6 border shadow-xl space-y-4 ${
+                  cat.isModCategory ? 'border-indigo-900/50 bg-indigo-950/10' : 'border-slate-800'
+                }`}
+              >
                 {/* Category Header */}
                 <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
                   <div className="flex items-center gap-2.5">
-                    {(() => {
+                    {cat.isModCategory ? (
+                      <div className="p-1.5 rounded-lg bg-indigo-950/80 border border-indigo-700/60 text-indigo-400">
+                        <Puzzle className="w-4 h-4" />
+                      </div>
+                    ) : (() => {
                       const Icon = CATEGORY_ICONS[cat.id] || Sliders;
                       return <Icon className="w-5 h-5 text-cyan-400" />;
                     })()}
                     <div>
-                      <h3 className="text-sm font-bold text-white tracking-wide">
-                        {cat.name}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-white tracking-wide">
+                          {cat.name}
+                        </h3>
+                        {cat.isModCategory && (
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-900/60 border border-indigo-700/70 text-indigo-300">
+                            Dynamic Mod Table
+                          </span>
+                        )}
+                      </div>
                       {cat.isSubTable && (
                         <p className="text-[11px] font-mono text-cyan-500/80">
                           Table: SandboxVars.{cat.tableName}
@@ -608,6 +847,152 @@ export default function SandboxSettings({ serverName, onNotify }) {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* ADD CUSTOM/MOD VARIABLE MODAL */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="glass-panel w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-950/95 shadow-2xl p-6 space-y-5">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-950 border border-indigo-700/60 flex items-center justify-center text-indigo-400">
+                  <Puzzle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Add Custom / Mod Setting</h3>
+                  <p className="text-xs text-slate-400">Define a new sandbox variable or mod sub-table option</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddCustomVariable} className="space-y-4">
+              {/* Table Selector */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Sub-table / Category
+                </label>
+                <select
+                  value={newVarTable}
+                  onChange={(e) => setNewVarTable(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                >
+                  <option value="General">General (Top-level SandboxVars)</option>
+                  {categories.filter(c => c.isSubTable).map(c => (
+                    <option key={c.tableName} value={c.tableName}>
+                      {c.tableName} ({c.name})
+                    </option>
+                  ))}
+                  <option value="__new__">+ Create New Sub-table (e.g. Brita, DynamicTraits)...</option>
+                </select>
+              </div>
+
+              {newVarTable === '__new__' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    New Sub-table Name (Lua identifier)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. DynamicTraits or MoreTraits"
+                    value={newVarCustomTable}
+                    onChange={(e) => setNewVarCustomTable(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              )}
+
+              {/* Key Name */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Variable Key Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. XPMultiplier, EnableFeature, SpawnChance"
+                  value={newVarKey}
+                  onChange={(e) => setNewVarKey(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 font-mono focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              {/* Type */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Data Type
+                  </label>
+                  <select
+                    value={newVarType}
+                    onChange={(e) => {
+                      const t = e.target.value;
+                      setNewVarType(t);
+                      if (t === 'boolean') setNewVarValue('true');
+                      else if (t === 'integer') setNewVarValue('1');
+                      else if (t === 'float') setNewVarValue('1.0');
+                      else setNewVarValue('');
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="boolean">Boolean (true / false)</option>
+                    <option value="integer">Integer (Whole number)</option>
+                    <option value="float">Float (Decimal number)</option>
+                    <option value="string">String (Text)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Initial Value
+                  </label>
+                  {newVarType === 'boolean' ? (
+                    <select
+                      value={newVarValue}
+                      onChange={(e) => setNewVarValue(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                    >
+                      <option value="true">true (Enabled)</option>
+                      <option value="false">false (Disabled)</option>
+                    </select>
+                  ) : (
+                    <input
+                      type={newVarType === 'integer' || newVarType === 'float' ? 'number' : 'text'}
+                      step={newVarType === 'float' ? '0.01' : '1'}
+                      value={newVarValue}
+                      onChange={(e) => setNewVarValue(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 font-mono focus:outline-none focus:border-cyan-500"
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-lg transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Variable</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -713,26 +1098,34 @@ export default function SandboxSettings({ serverName, onNotify }) {
 
 // Individual Sandbox Variable Card
 function SandboxFieldItem({ item, currentValue, originalValue, onChange, onReset }) {
-  const isModified = originalValue !== undefined && currentValue !== originalValue;
+  const isModified = (originalValue !== undefined && currentValue !== originalValue) || (originalValue === undefined && currentValue !== undefined);
 
   return (
     <div
       className={`p-4 rounded-xl border transition-all duration-200 flex flex-col justify-between gap-3 ${
         isModified
           ? 'bg-amber-950/20 border-amber-500/40 shadow-sm'
-          : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700/80'
+          : item.isMod
+            ? 'bg-slate-950/80 border-indigo-900/40 hover:border-indigo-700/60'
+            : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700/80'
       }`}
     >
       <div>
         {/* Top Key & Info Tags */}
         <div className="flex items-start justify-between gap-2">
-          <div>
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-bold text-slate-200 font-mono">
               {item.key}
             </span>
             {item.table !== 'General' && (
-              <span className="ml-1.5 text-[10px] font-mono text-cyan-400/80">
-                ({item.table})
+              <span className="text-[10px] font-mono text-cyan-400/80 bg-cyan-950/50 px-1.5 py-0.2 rounded border border-cyan-800/40">
+                {item.table}
+              </span>
+            )}
+            {item.isMod && (
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded bg-indigo-950 border border-indigo-700/60 text-indigo-300 flex items-center gap-1">
+                <Puzzle className="w-2.5 h-2.5" />
+                <span>Mod</span>
               </span>
             )}
           </div>
@@ -751,13 +1144,13 @@ function SandboxFieldItem({ item, currentValue, originalValue, onChange, onReset
 
             {item.defaultVal && (
               <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800/80">
-                Default: {item.defaultVal}
+                Def: {item.defaultVal}
               </span>
             )}
           </div>
         </div>
 
-        {/* Description / Hungarian Comment */}
+        {/* Description / Lua Comment */}
         {item.description && (
           <p className="text-[11px] text-slate-400 mt-1.5 line-clamp-2 leading-relaxed" title={item.description}>
             {item.description}
@@ -767,7 +1160,7 @@ function SandboxFieldItem({ item, currentValue, originalValue, onChange, onReset
 
       {/* Input Control Based on Type / Options */}
       <div className="pt-1">
-        {/* BOOLEAN CONTROL (Switch / Checkbox) */}
+        {/* BOOLEAN CONTROL (Switch / Toggle) */}
         {item.type === 'boolean' && (
           <label className="flex items-center gap-3 cursor-pointer select-none">
             <div
