@@ -133,13 +133,18 @@ export default function ModItem({
             {/* Quick Actions */}
             <div className="flex items-center gap-2 shrink-0">
               <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={isEnabled}
-                  onChange={() => onToggleEnabled(index)}
-                  className="sr-only peer"
-                />
-                <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                <div
+                  onClick={() => onToggleEnabled(index)}
+                  className={`w-11 h-6 flex items-center rounded-full p-1 transition duration-200 cursor-pointer ${
+                    isEnabled ? 'bg-emerald-600' : 'bg-slate-700'
+                  }`}
+                >
+                  <div
+                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition duration-200 ${
+                      isEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </div>
                 <span className="text-xs text-slate-400 font-medium hidden sm:inline">
                   {isEnabled ? 'Active' : 'Disabled'}
                 </span>
