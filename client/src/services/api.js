@@ -177,3 +177,18 @@ export async function deleteBackup(filename) {
   });
   return res.json();
 }
+
+export async function fetchSaveInfo(serverName) {
+  const res = await fetch(`${API_BASE}/save/info?serverName=${encodeURIComponent(serverName || '')}`);
+  return res.json();
+}
+
+export async function resetSaveWorld(payload) {
+  const res = await fetch(`${API_BASE}/save/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+}
+

@@ -224,6 +224,7 @@ export default function App() {
         {activeTab === 'backups' && (
           <BackupManager
             serverName={currentServer}
+            serverStatus={serverStatus}
             onNotify={addNotification}
           />
         )}

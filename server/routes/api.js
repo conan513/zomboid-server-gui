@@ -9,6 +9,7 @@ const workshopService = require('../services/workshopService');
 const iniParser = require('../services/iniParser');
 const sandboxParser = require('../services/sandboxParser');
 const backupService = require('../services/backupService');
+const saveService = require('../services/saveService');
 
 const MODS_FILE = path.join(DATA_DIR, 'mods.json');
 
@@ -398,6 +399,34 @@ router.delete('/backups/:filename', (req, res) => {
     res.json({ success: deleted });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- SAVE WORLD & RESET (WIPE) -----------------
+router.get('/save/info', (req, res) => {
+  try {
+    const settings = getSettings();
+    const serverName = req.query.serverName || settings.serverName || 'servertest';
+    const info = saveService.getSaveInfo(serverName);
+    res.json(info);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/save/reset', (req, res) => {
+  try {
+    const { serverName, resetWorld = true, resetDb = false, createBackup = true } = req.body || {};
+    const result = saveService.resetSave({
+      serverName,
+      resetWorld,
+      resetDb,
+      createBackup
+    });
+    res.json(result);
+  } catch (err) {
+    serverManager.addLog(`[Save Manager Error] Reset failed: ${err.message}`, 'error');
+    res.status(400).json({ success: false, error: err.message });
   }
 });
 
