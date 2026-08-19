@@ -134,6 +134,20 @@ export async function saveIniConfig(serverName, config) {
   return res.json();
 }
 
+export async function fetchSandboxConfig(serverName) {
+  const res = await fetch(`${API_BASE}/config/sandbox?serverName=${encodeURIComponent(serverName || '')}`);
+  return res.json();
+}
+
+export async function saveSandboxConfig(serverName, payload) {
+  const res = await fetch(`${API_BASE}/config/sandbox`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serverName, ...payload })
+  });
+  return res.json();
+}
+
 export async function fetchBackups() {
   const res = await fetch(`${API_BASE}/backups`);
   return res.json();

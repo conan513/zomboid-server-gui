@@ -3,6 +3,7 @@ import Navbar from './components/Navbar';
 import ModManager from './components/ModManager';
 import ConsoleView from './components/ConsoleView';
 import ServerSettings from './components/ServerSettings';
+import SandboxSettings from './components/SandboxSettings';
 import ServerInstaller from './components/ServerInstaller';
 import BackupManager from './components/BackupManager';
 import {
@@ -190,6 +191,13 @@ export default function App() {
           <ConsoleView
             logs={logs}
             serverStatus={serverStatus}
+            onNotify={addNotification}
+          />
+        )}
+
+        {activeTab === 'sandbox' && (
+          <SandboxSettings
+            serverName={currentServer}
             onNotify={addNotification}
           />
         )}

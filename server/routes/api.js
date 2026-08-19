@@ -7,6 +7,7 @@ const steamcmd = require('../services/steamcmd');
 const serverManager = require('../services/serverManager');
 const workshopService = require('../services/workshopService');
 const iniParser = require('../services/iniParser');
+const sandboxParser = require('../services/sandboxParser');
 const backupService = require('../services/backupService');
 
 const MODS_FILE = path.join(DATA_DIR, 'mods.json');
@@ -316,8 +317,39 @@ router.get('/config/sandbox', (req, res) => {
   try {
     const settings = getSettings();
     const serverName = req.query.serverName || settings.serverName || 'servertest';
-    const data = iniParser.readSandboxVars(serverName);
-    res.json({ serverName, sandbox: data });
+    const filePath = sandboxParser.getServerSandboxPath(serverName);
+    const data = sandboxParser.parseSandboxFile(filePath);
+    res.json({
+      serverName,
+      filePath,
+      exists: data.exists,
+      categories: data.categories,
+      flatVars: data.flatVars,
+      raw: data.raw
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/config/sandbox', (req, res) => {
+  try {
+    const { serverName, vars, rawLua } = req.body;
+    const activeServer = serverName || getSettings().serverName || 'servertest';
+    const filePath = sandboxParser.getServerSandboxPath(activeServer);
+
+    if (typeof rawLua === 'string') {
+      sandboxParser.writeRawSandboxFile(filePath, rawLua);
+      serverManager.addLog(`[Web UI] Saved raw Lua configuration to ${activeServer}_SandboxVars.lua`, 'system');
+    } else if (vars && typeof vars === 'object') {
+      const current = sandboxParser.parseSandboxFile(filePath);
+      sandboxParser.writeSandboxFile(filePath, vars, current.raw);
+      serverManager.addLog(`[Web UI] Saved sandbox variables to ${activeServer}_SandboxVars.lua`, 'system');
+    } else {
+      return res.status(400).json({ error: 'Either vars or rawLua is required' });
+    }
+
+    res.json({ success: true, message: 'Sandbox configuration saved successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

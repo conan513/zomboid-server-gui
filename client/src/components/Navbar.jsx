@@ -11,7 +11,8 @@ import {
   Users,
   Activity,
   Server,
-  Loader2
+  Loader2,
+  Globe
 } from 'lucide-react';
 
 export default function Navbar({
@@ -34,7 +35,8 @@ export default function Navbar({
   const navItems = [
     { id: 'mods', label: 'Mod Manager', icon: Layers, badge: 'Core' },
     { id: 'console', label: 'Live Console', icon: Terminal },
-    { id: 'settings', label: 'Configuration', icon: Sliders },
+    { id: 'sandbox', label: 'Sandbox Settings', icon: Globe },
+    { id: 'settings', label: 'Server INI', icon: Sliders },
     { id: 'installer', label: 'Installation & SteamCMD', icon: DownloadCloud, badge: isSteamCmdRunning ? 'Active' : null },
     { id: 'backups', label: 'Backups', icon: Archive }
   ];
