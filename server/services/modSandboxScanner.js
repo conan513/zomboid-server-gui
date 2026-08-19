@@ -52,9 +52,9 @@ function getModSearchPaths() {
 }
 
 /**
- * Recursively finds files matching a predicate inside a directory.
+ * Recursively finds files matching a predicate inside a directory with deep maxDepth.
  */
-function findFilesRecursive(dirPath, predicate, maxDepth = 6, currentDepth = 0) {
+function findFilesRecursive(dirPath, predicate, maxDepth = 15, currentDepth = 0) {
   const results = [];
   if (!fs.existsSync(dirPath) || currentDepth > maxDepth) return results;
 
@@ -146,9 +146,22 @@ function parseSandboxOptionsTxt(filePath) {
  */
 function loadTranslations(modDir) {
   const translations = {};
-  const transFiles = findFilesRecursive(modDir, (name) => {
+  const transFiles = findFilesRecursive(modDir, (name, full) => {
     const lower = name.toLowerCase();
-    return lower.startsWith('sandbox') && (lower.endsWith('.json') || lower.endsWith('.txt'));
+    if (lower === 'sandbox-options.txt') return false;
+    return (lower.startsWith('sandbox') || full.toLowerCase().includes('translate')) && 
+           (lower.endsWith('.json') || lower.endsWith('.txt'));
+  }, 15);
+
+  // Sort so generic/other languages load first (score 1), EN loads after (score 2), HU loads last (score 3)
+  transFiles.sort((a, b) => {
+    const score = (p) => {
+      const norm = p.replace(/\\/g, '/').toLowerCase();
+      if (norm.includes('/hu/') || norm.includes('_hu.') || norm.includes('hungarian')) return 3;
+      if (norm.includes('/en/') || norm.includes('_en.') || norm.includes('english')) return 2;
+      return 1;
+    };
+    return score(a) - score(b);
   });
 
   for (const tf of transFiles) {
@@ -157,7 +170,7 @@ function loadTranslations(modDir) {
         const json = fs.readJsonSync(tf);
         for (const [k, v] of Object.entries(json)) {
           if (typeof v === 'string') {
-            translations[k] = v;
+            translations[k] = cleanTranslationText(v);
           }
         }
       } else {
@@ -166,7 +179,7 @@ function loadTranslations(modDir) {
         for (const line of lines) {
           const match = line.match(/^([A-Za-z0-9_]+)\s*=\s*["'](.+?)["'](?:,)?$/);
           if (match) {
-            translations[match[1]] = match[2];
+            translations[match[1]] = cleanTranslationText(match[2]);
           }
         }
       }
@@ -176,12 +189,20 @@ function loadTranslations(modDir) {
   return translations;
 }
 
+function cleanTranslationText(str) {
+  if (!str) return '';
+  return str
+    .replace(/\\n/g, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/\\"/g, '"')
+    .trim();
+}
+
 /**
- * Scans all installed mods and returns a map of all available mod sandbox options.
+ * Scans all installed mods and returns a map of all available mod sandbox options with full translations and tooltips.
  */
 function scanAllModSandboxOptions() {
   const searchPaths = getModSearchPaths();
-  const discoveredMods = new Map(); // key: modId / workshopId, value: { name, options: [] }
   const allDiscoveredOptions = [];
 
   for (const rootPath of searchPaths) {
@@ -195,16 +216,16 @@ function scanAllModSandboxOptions() {
         try { stat = fs.statSync(modItemPath); } catch (e) { continue; }
         if (!stat.isDirectory()) continue;
 
-        // Search for sandbox-options.txt
-        const sandboxFiles = findFilesRecursive(modItemPath, (name) => name.toLowerCase() === 'sandbox-options.txt');
+        // Search for sandbox-options.txt with depth 15
+        const sandboxFiles = findFilesRecursive(modItemPath, (name) => name.toLowerCase() === 'sandbox-options.txt', 15);
         if (sandboxFiles.length === 0) continue;
 
-        // Load translations for this mod
+        // Load translations for this mod with depth 15
         const translations = loadTranslations(modItemPath);
 
         // Read mod info if mod.info exists
         let modTitle = item;
-        const modInfoFiles = findFilesRecursive(modItemPath, (name) => name.toLowerCase() === 'mod.info', 3);
+        const modInfoFiles = findFilesRecursive(modItemPath, (name) => name.toLowerCase() === 'mod.info', 10);
         if (modInfoFiles.length > 0) {
           try {
             const infoText = fs.readFileSync(modInfoFiles[0], 'utf-8');
@@ -221,14 +242,43 @@ function scanAllModSandboxOptions() {
             if (seenOptionPaths.has(opt.path)) continue;
             seenOptionPaths.add(opt.path);
 
-            // Match translations
-            const labelKey1 = `Sandbox_${opt.translationKey}`;
-            const labelKey2 = `Sandbox_${opt.table}_${opt.key}`;
-            const tooltipKey1 = `Sandbox_${opt.translationKey}_tooltip`;
-            const tooltipKey2 = `Sandbox_${opt.table}_${opt.key}_tooltip`;
+            // Match translations with comprehensive key permutations
+            const labelCandidates = [
+              `Sandbox_${opt.translationKey}`,
+              `Sandbox_${opt.table}_${opt.key}`,
+              `Sandbox_${opt.table}${opt.key}`,
+              `Sandbox_${opt.key}`,
+              opt.translationKey,
+              `${opt.table}_${opt.key}`
+            ];
 
-            const label = translations[labelKey1] || translations[labelKey2] || opt.key;
-            const description = translations[tooltipKey1] || translations[tooltipKey2] || '';
+            const tooltipCandidates = [
+              `Sandbox_${opt.translationKey}_tooltip`,
+              `Sandbox_${opt.translationKey}_Tooltip`,
+              `Sandbox_${opt.table}_${opt.key}_tooltip`,
+              `Sandbox_${opt.table}_${opt.key}_Tooltip`,
+              `Sandbox_${opt.table}${opt.key}_tooltip`,
+              `Sandbox_${opt.table}${opt.key}_Tooltip`,
+              `Sandbox_${opt.key}_tooltip`,
+              `${opt.translationKey}_tooltip`,
+              `${opt.table}_${opt.key}_tooltip`
+            ];
+
+            let label = opt.key;
+            for (const cand of labelCandidates) {
+              if (translations[cand]) {
+                label = translations[cand];
+                break;
+              }
+            }
+
+            let description = '';
+            for (const cand of tooltipCandidates) {
+              if (translations[cand]) {
+                description = translations[cand];
+                break;
+              }
+            }
 
             // Enum choices if any
             const options = [];
@@ -236,9 +286,22 @@ function scanAllModSandboxOptions() {
               const start = opt.min !== null ? opt.min : 1;
               const end = opt.max !== null ? opt.max : 5;
               for (let i = start; i <= end; i++) {
-                const optLabelKey = `Sandbox_${opt.translationKey}_option${i}`;
-                const optLabelKeyAlt = `Sandbox_${opt.table}_${opt.key}_option${i}`;
-                const choiceLabel = translations[optLabelKey] || translations[optLabelKeyAlt] || `Option ${i}`;
+                const optLabelCandidates = [
+                  `Sandbox_${opt.translationKey}_option${i}`,
+                  `Sandbox_${opt.translationKey}_Option${i}`,
+                  `Sandbox_${opt.table}_${opt.key}_option${i}`,
+                  `Sandbox_${opt.table}_${opt.key}_Option${i}`,
+                  `Sandbox_${opt.translationKey}_Values_option${i}`,
+                  `Sandbox_${opt.table}_${opt.key}_Values_option${i}`,
+                  `Sandbox_${opt.key}_option${i}`
+                ];
+                let choiceLabel = `Option ${i}`;
+                for (const oc of optLabelCandidates) {
+                  if (translations[oc]) {
+                    choiceLabel = translations[oc];
+                    break;
+                  }
+                }
                 options.push({ value: i, label: choiceLabel });
               }
             }
