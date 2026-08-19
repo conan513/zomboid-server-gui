@@ -31,7 +31,34 @@ app.use((req, res, next) => {
   if (require('fs').existsSync(indexHtml)) {
     res.sendFile(indexHtml);
   } else {
-    res.send('Project Zomboid Dedicated Server GUI API is running. Build frontend or run Vite dev server.');
+    res.status(503).send(`
+      <!DOCTYPE html>
+      <html lang="hu">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Project Zomboid Server GUI</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; background: #0b0f19; color: #e2e8f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+            .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; max-width: 540px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+            h1 { color: #f87171; margin-top: 0; font-size: 1.5rem; }
+            p { color: #94a3b8; line-height: 1.6; }
+            code { background: #0f172a; color: #38bdf8; padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 0.95rem; }
+            .cmd-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 12px; margin: 16px 0; text-align: left; overflow-x: auto; color: #4ade80; font-family: monospace; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>Frontend nincs lefordítva</h1>
+            <p>A backend szerver sikeresen fut, de a React frontend (<code>client/dist</code>) még nem lett lefordítva.</p>
+            <p><strong>Megoldás:</strong> Állítsd le a szervert (Ctrl+C), majd futtasd a projekt gyökérkönyvtárában:</p>
+            <div class="cmd-box">npm run build</div>
+            <p>vagy indítsd közvetlenül a felkészített indítóscripttel:</p>
+            <div class="cmd-box">./start.sh</div>
+          </div>
+        </body>
+      </html>
+    `);
   }
 });
 

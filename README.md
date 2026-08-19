@@ -48,10 +48,20 @@ start.bat
 ```
 
 ### Linux alatt
-Tedd futtathatóvá és indítsd el a **`start.sh`** szkriptet:
+Tedd futtathatóvá és indítsd el a **`start.sh`** szkriptet (ez automatikusan feltelepíti a függőségeket és lefordítja a frontendet is, ha még nincs kész):
 ```bash
 chmod +x start.sh
 ./start.sh
+```
+
+#### Kézi indítás / fejlesztői mód:
+Ha kézzel vagy külön indítod:
+```bash
+# 1. Függőségek és frontend lefordítása (első alkalommal vagy frissítéskor):
+npm run build
+
+# 2. Szerver indítása:
+npm start
 ```
 
 A grafikus felület a böngészőben érhető el:
